@@ -238,3 +238,171 @@ fields:
       ```
     required: true
     default: []
+    selector:
+      object: {}
+  url:
+    name: URL / Link
+    description: |-
+      Optional URL to open when the notification is tapped.
+      Supports relative HA paths (/lovelace/cameras), full URLs
+      (https://example.com), or Android-specific schemes
+      (app://<package>, entityId:<entity_id>).
+    required: true
+    default: ""
+    selector:
+      text: {}
+
+variables:
+  person_notify_services: !input person_notify_map
+  bedtime_toggle: !input bedtime_entity
+  configured_routes: !input announcement_routes
+
+sequence:
+  - variables:
+      resolved_mobile_targets: >-
+        {% set ns = namespace(out=[]) %}
+        {% for item in person_targets | default([], true) %}
+          {% if item is mapping %}
+            {% set p = (item.person if item.person is defined else (item.entity_id if item.entity_id is defined else '')) | string | trim %}
+            {% set enabled = item.enabled if item.enabled is defined else true %}
+          {% else %}
+            {% set p = item | string | trim %}
+            {% set enabled = true %}
+          {% endif %}
+          {% if p != '' and enabled %}
+            {% set services = person_notify_services.get(p, []) %}
+            {% for svc in services %}
+              {% set clean_svc = svc | replace('notify.', '') | trim %}
+              {% set exists = (ns.out | selectattr('service', 'equalto', clean_svc) | list | count) > 0 %}
+              {% if not exists %}
+                {% set ns.out = ns.out + [{'service': clean_svc, 'enabled': true}] %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.out }}
+
+  # 1. Room & Device Announcements (Echo, TV, PC)
+  - if:
+      - condition: template
+        value_template: >-
+          {{
+            (announce | default(true) == true)
+            and not (clear | default(false))
+            and (
+              bedtime_toggle == ''
+              or bedtime_toggle is none
+              or is_state(bedtime_toggle, 'off')
+            )
+          }}
+    then:
+      - repeat:
+          for_each: "{{ configured_routes | default([], true) }}"
+          sequence:
+            - variables:
+                route_active: >-
+                  {% set ent = repeat.item.presence_entity | default('') | string | trim %}
+                  {% if ent == '' %}
+                    true
+                  {% elif repeat.item.exclude_states is defined %}
+                    {{ states(ent) not in (repeat.item.exclude_states | list) }}
+                  {% else %}
+                    {% set allowed = repeat.item.presence_states | default(['on']) | list %}
+                    {{ states(ent) in allowed }}
+                  {% endif %}
+            - if:
+                - condition: template
+                  value_template: "{{ route_active }}"
+              then:
+                - choose:
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ repeat.item.notify_entity is defined and repeat.item.notify_entity != '' }}"
+                      sequence:
+                        - action: notify.send_message
+                          target:
+                            entity_id: "{{ repeat.item.notify_entity }}"
+                          data:
+                            message: "{{ message }}"
+                    - conditions:
+                        - condition: template
+                          value_template: >-
+                            {{
+                              repeat.item.notify_service is defined
+                              and repeat.item.notify_service != ''
+                              and (repeat.item.include_title | default(false) == true)
+                            }}
+                      sequence:
+                        - action: >-
+                            {{
+                              repeat.item.notify_service
+                              if repeat.item.notify_service.startswith('notify.')
+                              else 'notify.' ~ repeat.item.notify_service
+                            }}
+                          data:
+                            title: "{{ title | default('Home Assistant') }}"
+                            message: "{{ message }}"
+                    - conditions:
+                        - condition: template
+                          value_template: >-
+                            {{
+                              repeat.item.notify_service is defined
+                              and repeat.item.notify_service != ''
+                            }}
+                      sequence:
+                        - action: >-
+                            {{
+                              repeat.item.notify_service
+                              if repeat.item.notify_service.startswith('notify.')
+                              else 'notify.' ~ repeat.item.notify_service
+                            }}
+                          data:
+                            message: "{{ message }}"
+
+  # 2. Mobile App Push Notifications
+  - repeat:
+      for_each: "{{ resolved_mobile_targets }}"
+      sequence:
+        - variables:
+            _notify_data: >-
+              {% set d = {'ttl': 0, 'priority': 'high'} %}
+              {% set a = actions | default([], true) %}
+              {% set cam = camera | default('', true) | string | trim %}
+              {% set use_cache = use_cached_frame | default(true) == true %}
+              {% if tag | default('') != '' %}
+                {% set d = dict(d, tag=tag) %}
+              {% endif %}
+              {% if not (clear | default(false)) %}
+                {% if url | default('') != '' %}
+                  {% set d = dict(d, url=url, clickAction=url) %}
+                {% endif %}
+                {% if a | count > 0 %}
+                  {% set d = dict(d, actions=a) %}
+                {% endif %}
+                {% if cam != '' %}
+                  {% if use_cache %}
+                    {% set d = dict(d, image='/api/camera_proxy/' ~ cam) %}
+                  {% else %}
+                    {% set pic = state_attr(cam, 'entity_picture') | default('/api/camera_proxy/' ~ cam, true) %}
+                    {% set sep = '&' if '?' in pic else '?' %}
+                    {% set fresh_img = pic ~ sep ~ 't=' ~ (now().timestamp() | int) %}
+                    {% set d = dict(d, image=fresh_img, entity_id=cam) %}
+                  {% endif %}
+                {% endif %}
+                {% if critical | default(false) == true %}
+                  {% set ios_sound = {'name': 'default', 'critical': 1, 'volume': 1.0} %}
+                  {% set ios_push = {'interruption-level': 'critical', 'sound': ios_sound} %}
+                  {% set d = dict(d, channel='alarm_stream', push=ios_push) %}
+                {% endif %}
+              {% endif %}
+              {{ d }}
+        - if:
+            - condition: template
+              value_template: "{{ repeat.item.enabled | default(false) == true }}"
+          then:
+            - action: "notify.{{ repeat.item.service | replace('notify.', '') }}"
+              data:
+                message: >-
+                  {{ 'clear_notification' if clear | default(false) else message }}
+                title: "{{ title | default('Home Assistant') }}"
+                data: "{{ _notify_data }}"
