@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=
 blueprint:
   name: Master Notifier
   author: eric-schmieg
@@ -28,11 +29,7 @@ blueprint:
             person.jane_doe:
               - mobile_app_janes_iphone
             ```
-          default:
-            person.example_user_1:
-              - mobile_app_phone_1
-            person.example_user_2:
-              - mobile_app_iphone_2
+          default: {}
           selector:
             object: {}
 
@@ -104,20 +101,7 @@ blueprint:
               notify_service: notify.my_pc
               include_title: false
             ```
-          default:
-            - name: Office Echo
-              presence_entity: binary_sensor.office_presence
-              presence_states:
-                - "on"
-              notify_entity: notify.office_echo_dot_announce
-            - name: Living Room TV
-              presence_entity: media_player.living_room_tv
-              exclude_states:
-                - "off"
-                - "unavailable"
-                - "standby"
-              notify_service: notify.living_room_tv
-              include_title: true
+          default: []
           selector:
             object: {}
 
