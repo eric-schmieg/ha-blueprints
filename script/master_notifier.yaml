@@ -1,7 +1,5 @@
 blueprint:
   name: Master Notifier
-  author: eric-schmieg
-  source_url: https://github.com/eric-schmieg/ha-blueprints/main/script/master_notifier.yaml
   description: >-
     Presence-aware announcer (Alexa, TV, PC, etc.) with dynamic person-to-phone
     mapping, camera snapshots, critical alerts, and notification clearing.
@@ -251,15 +249,6 @@ fields:
     default: ""
     selector:
       text: {}
-  mobile_targets:
-    name: Direct Mobile App Targets
-    description: >-
-      Optional direct list of mobile app services (`- service: mobile_app_xyz`
-      with `enabled: true`) if bypassing person_targets.
-    required: true
-    default: []
-    selector:
-      object: {}
 
 variables:
   person_notify_services: !input person_notify_map
@@ -269,7 +258,7 @@ variables:
 sequence:
   - variables:
       resolved_mobile_targets: >-
-        {% set ns = namespace(out=(mobile_targets | default([], true) | list)) %}
+        {% set ns = namespace(out=[]) %}
         {% for item in person_targets | default([], true) %}
           {% if item is mapping %}
             {% set p = (item.person if item.person is defined else (item.entity_id if item.entity_id is defined else '')) | string | trim %}
@@ -389,42 +378,4 @@ sequence:
                   {% set d = dict(d, url=url, clickAction=url) %}
                 {% endif %}
                 {% if a | count > 0 %}
-                  {% set d = dict(d, actions=a) %}
-                {% endif %}
-                {% if cam != '' %}
-                  {% if use_cache %}
-                    {% set d = dict(d, image='/api/camera_proxy/' ~ cam) %}
-                  {% else %}
-                    {% set pic = state_attr(cam, 'entity_picture') | default('/api/camera_proxy/' ~ cam, true) %}
-                    {% set sep = '&' if '?' in pic else '?' %}
-                    {% set d = dict(d,
-                      image=pic ~ sep ~ 't=' ~ (now().timestamp() | int),
-                      entity_id=cam
-                    ) %}
-                  {% endif %}
-                {% endif %}
-                {% if critical | default(false) == true %}
-                  {% set d = dict(d,
-                    channel='alarm_stream',
-                    push={
-                      'interruption-level': 'critical',
-                      'sound': {
-                        'name': 'default',
-                        'critical': 1,
-                        'volume': 1.0
-                      }
-                    }
-                  ) %}
-                {% endif %}
-              {% endif %}
-              {{ d }}
-        - if:
-            - condition: template
-              value_template: "{{ repeat.item.enabled | default(false) == true }}"
-          then:
-            - action: "notify.{{ repeat.item.service | replace('notify.', '') }}"
-              data:
-                message: >-
-                  {{ 'clear_notification' if clear | default(false) else message }}
-                title: "{{ title | default('Home Assistant') }}"
-                data: "{{ _notify_data }}"
+                  {% set d = dict(d, actions=a
