@@ -1,0 +1,428 @@
+blueprint:
+  name: Master Notifier
+  description: >-
+    Presence-aware announcer (Alexa, TV, PC, etc.) with dynamic person-to-phone
+    mapping, camera snapshots, critical alerts, and notification clearing.
+  domain: script
+  input:
+    person_map_section:
+      name: 1. Person to Mobile App Mapping
+      icon: mdi:account-multiple
+      description: >-
+        Map your Home Assistant `person` entities to their respective mobile app
+        notification service names.
+      collapsed: false
+      input:
+        person_notify_map:
+          name: Person Notify Services Dictionary
+          description: |-
+            Define each `person` entity and a list of their `mobile_app` notify service names (without the `notify.` domain prefix).
+
+            **Example:**
+            ```yaml
+            person.john_doe:
+              - mobile_app_johns_pixel
+              - mobile_app_johns_tablet
+            person.jane_doe:
+              - mobile_app_janes_iphone
+            ```
+          default:
+            person.example_user_1:
+              - mobile_app_phone_1
+            person.example_user_2:
+              - mobile_app_iphone_2
+          selector:
+            object: {}
+
+    quiet_hours_section:
+      name: 2. Quiet Hours / Bedtime Mode
+      icon: mdi:sleep
+      description: Optional toggle that suppresses room voice/screen announcements when turned ON.
+      collapsed: false
+      input:
+        bedtime_entity:
+          name: Bedtime / Do Not Disturb Toggle
+          description: >-
+            Select an `input_boolean`, `binary_sensor`, or `switch` that, when ON,
+            mutes all voice and screen announcements. Leave blank to always allow
+            announcements.
+          default: ""
+          selector:
+            entity:
+              domain:
+                - input_boolean
+                - binary_sensor
+                - switch
+
+    announcement_section:
+      name: 3. Presence-Aware Room & Device Announcements
+      icon: mdi:bullhorn
+      description: >-
+        Define your rooms/devices, how to detect presence or active state, and
+        which notification entity or service to trigger.
+      collapsed: false
+      input:
+        announcement_routes:
+          name: Announcement Routes
+          description: |-
+            A list of announcement targets. Supports modern `notify.send_message` entities (like Alexa Media Player / Echo devices) and legacy `notify.<service>` calls (like Fire TV, Android TV, or HASS.Agent PC notifications).
+
+            **Supported Keys per Item:**
+            - `name`: Friendly label for your reference
+            - `presence_entity`: Sensor/device to check before announcing (leave blank to always announce)
+            - `presence_states`: *(Optional)* List of active states that allow the announcement (defaults to `['on']`)
+            - `exclude_states`: *(Optional)* Trigger when `presence_entity` is **NOT** in these states (e.g., `['off', 'unavailable']`)
+            - `notify_entity`: Target entity for `notify.send_message` (e.g., `notify.office_echo_dot_announce`)
+            - `notify_service`: Target service for legacy `notify.<service>` calls (e.g., `notify.fire_tv` or `notify.my_pc`)
+            - `include_title`: *(Optional)* Set to `true` if `notify_service` supports a `title` parameter
+
+            **Example covering Echo, TV, and PC:**
+            ```yaml
+            # 1. Echo / Smart Speaker (announces only when room occupancy sensor is 'on')
+            - name: Office Echo
+              presence_entity: binary_sensor.office_fp2_presence
+              presence_states:
+                - "on"
+              notify_entity: notify.office_echo_dot_announce
+
+            # 2. Smart TV (announces whenever the TV is NOT off or unavailable, includes title)
+            - name: Living Room Fire TV
+              presence_entity: media_player.living_room_fire_tv
+              exclude_states:
+                - "off"
+                - "unavailable"
+              notify_service: notify.living_room_fire_tv
+              include_title: true
+
+            # 3. Desktop PC via HASS.Agent (announces when PC sensor is online/not unavailable)
+            - name: Gaming PC
+              presence_entity: sensor.my_pc_lastsystemstatechange
+              exclude_states:
+                - "unavailable"
+              notify_service: notify.my_pc
+              include_title: false
+            ```
+          default:
+            - name: Office Echo
+              presence_entity: binary_sensor.office_presence
+              presence_states:
+                - "on"
+              notify_entity: notify.office_echo_dot_announce
+            - name: Living Room TV
+              presence_entity: media_player.living_room_tv
+              exclude_states:
+                - "off"
+                - "unavailable"
+                - "standby"
+              notify_service: notify.living_room_tv
+              include_title: true
+          selector:
+            object: {}
+
+mode: parallel
+max: 20
+
+fields:
+  title:
+    name: Title
+    required: true
+    default: Home Assistant
+    selector:
+      text: {}
+  message:
+    name: Message
+    required: true
+    selector:
+      text: {}
+  person_targets:
+    name: Person Targets
+    description: |-
+      Person entities to notify. Use this format:
+
+      ```yaml
+        - person.person_1
+        - person.person_2
+      ```
+
+      For more control, you can use this format to specify enabled logic:
+
+      ```yaml
+        - person: person.person_1
+          enabled: "{{ is_state('person.person_1', 'home') }}"
+      ```
+
+      Strings default to `enabled=true`. Objects support `enabled: true/false` or a template value.
+    required: true
+    default: []
+    selector:
+      object: {}
+  announce:
+    name: Announce via Room Speakers / Displays
+    description: Global toggle for voice and room announcements
+    required: true
+    default: true
+    selector:
+      boolean: {}
+  critical:
+    name: Critical Notification
+    description: >-
+      Bypass Do Not Disturb and silent mode on both Android (alarm_stream) and
+      iOS (critical push alert).
+    required: true
+    default: false
+    selector:
+      boolean: {}
+  camera:
+    name: Camera Entity
+    description: Optional camera entity to attach a snapshot to the notification
+    required: false
+    selector:
+      entity:
+        domain: camera
+  use_cached_frame:
+    name: Use Cached Camera Frame
+    description: >-
+      When true, uses the static cached URL so the phone reuses its cached frame
+      and iOS does not open a live stream. When false, busts the cache for a
+      fresh frame.
+    required: true
+    default: true
+    selector:
+      boolean: {}
+  tag:
+    name: Tag
+    description: Optional tag for clearing or replacing notifications
+    required: true
+    default: ""
+    selector:
+      text: {}
+  clear:
+    name: Clear Notification
+    description: >-
+      Removes notification on each device with the same tag; when true, ignores
+      title, message, URL, and other fields.
+    required: true
+    default: false
+    selector:
+      boolean: {}
+  actions:
+    name: Actions
+    description: |-
+      Optional mobile notification action buttons.
+      Example:
+      ```yaml
+        - action: OPEN_GARAGE
+          title: Open Garage
+        - action: DISMISS
+          title: Dismiss
+      ```
+      For the trigger to use to get the value back:
+      ```yaml
+        - id: feedback
+          event_type: mobile_app_notification_action
+          trigger: event
+        - id: feedback_ios
+          event_type: ios.notification_action_fired
+          trigger: event
+      ```
+      Then use Template Condition with the following:
+      ```yaml
+      - condition: template
+        value_template: >-
+          {% set action = trigger.event.data.action if trigger.platform == 'event'
+             and trigger.event.event_type == 'mobile_app_notification_action'
+             else trigger.event.data.actionName %}
+          {{ action is not none and action == 'OPEN_GARAGE' }}
+      ```
+    required: true
+    default: []
+    selector:
+      object: {}
+  url:
+    name: URL / Link
+    description: |-
+      Optional URL to open when the notification is tapped.
+      Supports relative HA paths (/lovelace/cameras), full URLs
+      (https://example.com), or Android-specific schemes
+      (app://<package>, entityId:<entity_id>).
+    required: true
+    default: ""
+    selector:
+      text: {}
+  mobile_targets:
+    name: Direct Mobile App Targets
+    description: >-
+      Optional direct list of mobile app services (`- service: mobile_app_xyz`
+      with `enabled: true`) if bypassing person_targets.
+    required: true
+    default: []
+    selector:
+      object: {}
+
+variables:
+  person_notify_services: !input person_notify_map
+  bedtime_toggle: !input bedtime_entity
+  configured_routes: !input announcement_routes
+
+sequence:
+  - variables:
+      resolved_mobile_targets: >-
+        {% set ns = namespace(out=(mobile_targets | default([], true) | list)) %}
+        {% for item in person_targets | default([], true) %}
+          {% if item is mapping %}
+            {% set p = (item.person if item.person is defined else (item.entity_id if item.entity_id is defined else '')) | string | trim %}
+            {% set enabled = item.enabled if item.enabled is defined else true %}
+          {% else %}
+            {% set p = item | string | trim %}
+            {% set enabled = true %}
+          {% endif %}
+          {% if p != '' and enabled %}
+            {% set services = person_notify_services.get(p, []) %}
+            {% for svc in services %}
+              {% set clean_svc = svc | replace('notify.', '') | trim %}
+              {% set exists = (ns.out | selectattr('service', 'equalto', clean_svc) | list | count) > 0 %}
+              {% if not exists %}
+                {% set ns.out = ns.out + [{'service': clean_svc, 'enabled': true}] %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.out }}
+
+  # 1. Room & Device Announcements (Echo, TV, PC)
+  - if:
+      - condition: template
+        value_template: >-
+          {{
+            (announce | default(true) == true)
+            and not (clear | default(false))
+            and (
+              bedtime_toggle == ''
+              or bedtime_toggle is none
+              or is_state(bedtime_toggle, 'off')
+            )
+          }}
+    then:
+      - repeat:
+          for_each: "{{ configured_routes | default([], true) }}"
+          sequence:
+            - variables:
+                route_active: >-
+                  {% set ent = repeat.item.presence_entity | default('') | string | trim %}
+                  {% if ent == '' %}
+                    true
+                  {% elif repeat.item.exclude_states is defined %}
+                    {{ states(ent) not in (repeat.item.exclude_states | list) }}
+                  {% else %}
+                    {% set allowed = repeat.item.presence_states | default(['on']) | list %}
+                    {{ states(ent) in allowed }}
+                  {% endif %}
+            - if:
+                - condition: template
+                  value_template: "{{ route_active }}"
+              then:
+                - choose:
+                    # Modern notify entity (e.g. Alexa Media Player notify.send_message)
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ repeat.item.notify_entity is defined and repeat.item.notify_entity != '' }}"
+                      sequence:
+                        - action: notify.send_message
+                          target:
+                            entity_id: "{{ repeat.item.notify_entity }}"
+                          data:
+                            message: "{{ message }}"
+                    # Legacy notify service WITH title (e.g. Fire TV / Android TV)
+                    - conditions:
+                        - condition: template
+                          value_template: >-
+                            {{
+                              repeat.item.notify_service is defined
+                              and repeat.item.notify_service != ''
+                              and (repeat.item.include_title | default(false) == true)
+                            }}
+                      sequence:
+                        - action: >-
+                            {{
+                              repeat.item.notify_service
+                              if repeat.item.notify_service.startswith('notify.')
+                              else 'notify.' ~ repeat.item.notify_service
+                            }}
+                          data:
+                            title: "{{ title | default('Home Assistant') }}"
+                            message: "{{ message }}"
+                    # Legacy notify service WITHOUT title (e.g. PC / simple notify)
+                    - conditions:
+                        - condition: template
+                          value_template: >-
+                            {{
+                              repeat.item.notify_service is defined
+                              and repeat.item.notify_service != ''
+                            }}
+                      sequence:
+                        - action: >-
+                            {{
+                              repeat.item.notify_service
+                              if repeat.item.notify_service.startswith('notify.')
+                              else 'notify.' ~ repeat.item.notify_service
+                            }}
+                          data:
+                            message: "{{ message }}"
+
+  # 2. Mobile App Push Notifications
+  - repeat:
+      for_each: "{{ resolved_mobile_targets }}"
+      sequence:
+        - variables:
+            _notify_data: >-
+              {% set d = {'ttl': 0, 'priority': 'high'} %}
+              {% set a = actions | default([], true) %}
+              {% set cam = camera | default('', true) | string | trim %}
+              {% set use_cache = use_cached_frame | default(true) == true %}
+              {% if tag | default('') != '' %}
+                {% set d = dict(d, tag=tag) %}
+              {% endif %}
+              {% if not (clear | default(false)) %}
+                {% if url | default('') != '' %}
+                  {% set d = dict(d, url=url, clickAction=url) %}
+                {% endif %}
+                {% if a | count > 0 %}
+                  {% set d = dict(d, actions=a) %}
+                {% endif %}
+                {% if cam != '' %}
+                  {% if use_cache %}
+                    {% set d = dict(d, image='/api/camera_proxy/' ~ cam) %}
+                  {% else %}
+                    {% set pic = state_attr(cam, 'entity_picture') | default('/api/camera_proxy/' ~ cam, true) %}
+                    {% set sep = '&' if '?' in pic else '?' %}
+                    {% set d = dict(d,
+                      image=pic ~ sep ~ 't=' ~ (now().timestamp() | int),
+                      entity_id=cam
+                    ) %}
+                  {% endif %}
+                {% endif %}
+                {% if critical | default(false) == true %}
+                  {% set d = dict(d,
+                    channel='alarm_stream',
+                    push={
+                      'interruption-level': 'critical',
+                      'sound': {
+                        'name': 'default',
+                        'critical': 1,
+                        'volume': 1.0
+                      }
+                    }
+                  ) %}
+                {% endif %}
+              {% endif %}
+              {{ d }}
+        - if:
+            - condition: template
+              value_template: "{{ repeat.item.enabled | default(false) == true }}"
+          then:
+            - action: "notify.{{ repeat.item.service | replace('notify.', '') }}"
+              data:
+                message: >-
+                  {{ 'clear_notification' if clear | default(false) else message }}
+                title: "{{ title | default('Home Assistant') }}"
+                data: "{{ _notify_data }}"
