@@ -378,4 +378,42 @@ sequence:
                   {% set d = dict(d, url=url, clickAction=url) %}
                 {% endif %}
                 {% if a | count > 0 %}
-                  {% set d = dict(d, actions=a
+                  {% set d = dict(d, actions=a) %}
+                {% endif %}
+                {% if cam != '' %}
+                  {% if use_cache %}
+                    {% set d = dict(d, image='/api/camera_proxy/' ~ cam) %}
+                  {% else %}
+                    {% set pic = state_attr(cam, 'entity_picture') | default('/api/camera_proxy/' ~ cam, true) %}
+                    {% set sep = '&' if '?' in pic else '?' %}
+                    {% set d = dict(d,
+                      image=pic ~ sep ~ 't=' ~ (now().timestamp() | int),
+                      entity_id=cam
+                    ) %}
+                  {% endif %}
+                {% endif %}
+                {% if critical | default(false) == true %}
+                  {% set d = dict(d,
+                    channel='alarm_stream',
+                    push={
+                      'interruption-level': 'critical',
+                      'sound': {
+                        'name': 'default',
+                        'critical': 1,
+                        'volume': 1.0
+                      }
+                    }
+                  ) %}
+                {% endif %}
+              {% endif %}
+              {{ d }}
+        - if:
+            - condition: template
+              value_template: "{{ repeat.item.enabled | default(false) == true }}"
+          then:
+            - action: "notify.{{ repeat.item.service | replace('notify.', '') }}"
+              data:
+                message: >-
+                  {{ 'clear_notification' if clear | default(false) else message }}
+                title: "{{ title | default('Home Assistant') }}"
+                data: "{{ _notify_data }}"
